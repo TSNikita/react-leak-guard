@@ -8,8 +8,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "react-leak-guard/node_modules/.bin/tsc",
+    "dev": "react-leak-guard/node_modules/.bin/tsc --watch",
     "clean": "rm -rf dist"
   },
   "keywords": [

@@ -1,5 +1,5 @@
 # Dependencies
-node_modules/
+react-leak-guard/node_modules/
 
 # Build output
 dist/
