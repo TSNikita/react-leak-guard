@@ -1,7 +1,7 @@
 /**
  * LeakGuard Engine — Core runtime for automatic memory leak prevention
  *
- * Patent Pending: Lifecycle Registry + StateUpdateProxy + AutoCleanup Engine
+ * Patent Pending: Lifecycle Registry + StateUpdateProxy + AutoCleanup Engine1
  */
 
 export type OperationType = 'fetch' | 'timer' | 'interval' | 'event' | 'animation';
