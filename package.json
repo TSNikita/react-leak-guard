@@ -1,6 +1,6 @@
 {
   "name": "react-leak-guard",
-  "version": "0.1.0-alpha",
+  "version": "0.2.0",
   "description": "Automatic memory leak prevention for React applications with runtime detection, auto-cleanup, and production diagnostics",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
