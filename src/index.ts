@@ -1,16 +1,22 @@
 /**
  * react-leak-guard
- * Automatic memory leak prevention for React applications
- *
- * Patent Pending
+ * Automatic memory leak prevention for React applications.
+ * Patent Pending.
  */
 
-export { LeakGuardEngine, leakGuard } from './leak-guard';
+// Экспорт ядра
+export { LeakGuardEngine, globalEngine } from './core/engine';
+export { LeakBuffer } from './core/buffer';
+
+// Экспорт React-хуков
+export * from './react';
+
+// Экспорт типов
 export type {
-    AsyncOperation,
+    OperationType,
+    TrackedOperation,
+    ComponentState,
     LeakRecord,
     LeakReport,
     LeakGuardMode,
-    OperationType,
-} from './leak-guard';
-export { useLeakGuard } from './useLeakGuard';
+} from './core/types';
