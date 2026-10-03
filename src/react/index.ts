@@ -1,4 +1,4 @@
-export { useLeakGuard } from './useLeakGuard';
+export { useLeakGuard, LeakGuardProvider } from './useLeakGuard';
 export { useSafeState } from './useSafeState';
 export { useSafeTimeout } from './useSafeTimeout';
 export { useSafeInterval } from './useSafeInterval';

@@ -13,10 +13,10 @@ export * from './react';
 
 // Экспорт типов
 export type {
-    OperationType,
-    TrackedOperation,
-    ComponentState,
-    LeakRecord,
-    LeakReport,
-    LeakGuardMode,
+  OperationType,
+  TrackedOperation,
+  ComponentState,
+  LeakRecord,
+  LeakReport,
+  LeakGuardMode,
 } from './core/types';

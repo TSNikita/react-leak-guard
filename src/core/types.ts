@@ -1,45 +1,40 @@
-/**
- * Типы отслеживаемых асинхронных операций
- */
-export type OperationType = 'setState' | 'fetch' | 'timer' | 'interval' | 'event' | 'animation' | 'custom';
+export type OperationType =
+  | 'setState'
+  | 'fetch'
+  | 'timer'
+  | 'interval'
+  | 'event'
+  | 'animation'
+  | 'websocket'
+  | 'worker'
+  | 'custom';
 
-/**
- * Интерфейс отслеживаемой операции
- */
 export interface TrackedOperation {
-    id: string;
-    type: OperationType;
-    cleanup: () => void;
-    source: string; // Стек вызовов или имя источника
+  id?: string; // <-- Сделали опциональным, так как движок генерирует ключ сам
+  type: OperationType;
+  cleanup?: () => void;
+  source?: string;
 }
 
-/**
- * Состояние компонента в реестре движка
- */
 export interface ComponentState {
-    isMounted: boolean;
-    operations: Map<string, TrackedOperation>;
-    leakCount: number;
+  isMounted: boolean;
+  operations: Map<string, TrackedOperation>;
+  leakCount: number;
+  name?: string;
 }
 
-/**
- * Запись об обнаруженной утечке
- */
 export interface LeakRecord {
-    component: string;
-    operation: OperationType;
-    stack: string;
-    timestamp: number;
+  component: string;
+  operation: string;
+  stack: string;
+  timestamp: number;
 }
 
-/**
- * Агрегированный отчет об утечках
- */
 export interface LeakReport {
-    totalLeaks: number;
-    byComponent: Record<string, number>;
-    byOperation: Record<string, number>;
-    leaks: LeakRecord[];
+  totalLeaks: number;
+  byComponent: Record<string, number>;
+  byOperation: Record<string, number>;
+  leaks?: LeakRecord[];
 }
 
 export type LeakGuardMode = 'development' | 'production';
