@@ -1,96 +1,116 @@
-import { describe, it, expect, vi } from 'vitest';
-import React from 'react';
-import { render, act, fireEvent } from '@testing-library/react';
-import { useLeakGuard } from '../useLeakGuard';
+import { describe, expect, it, vi } from 'vitest';
+import React, { useEffect } from 'react';
+import { act, fireEvent, render } from '@testing-library/react';
+import { LeakGuardProvider, useLeakGuard } from '../useLeakGuard';
 import { useSafeState } from '../useSafeState';
 
-// Обычный компонент для тестов нормальной работы
-function TestComponent({ onUnmount }: { onUnmount?: () => void }) {
-    const ref = useLeakGuard('TestComponent');
-    const [count, setCount] = useSafeState(ref, 'TestComponent', 0);
-
-    React.useEffect(() => {
-        const timer = setTimeout(() => {
-            setCount(999);
-        }, 100);
-
-        return () => {
-            clearTimeout(timer); // Здесь мы делаем всё правильно
-            onUnmount?.();
-        };
-    }, [setCount]);
-
-    return (
-        <div>
-            <span data-testid="count">{count}</span>
-            <button data-testid="btn" onClick={() => setCount(c => c + 1)}>
-                Increment
-            </button>
-        </div>
-    );
-}
-
-// Специальный компонент, который НАМЕРЕННО допускает утечку (забывает clearTimeout)
-function LeakyTestComponent({ onUnmount }: { onUnmount?: () => void }) {
-    const ref = useLeakGuard('LeakyComponent');
-    const [count, setCount] = useSafeState(ref, 'LeakyComponent', 0);
-
-    React.useEffect(() => {
-        // Намеренно НЕ очищаем таймер, чтобы симулировать утечку памяти
-        setTimeout(() => {
-            setCount(999); // Эта попытка должна быть заблокирована библиотекой!
-        }, 100);
-
-        return () => {
-            onUnmount?.();
-        };
-    }, [setCount]);
-
-    return <span data-testid="count">{count}</span>;
-}
-
 describe('React Hooks', () => {
-    it('useSafeState должен работать как обычный useState при монтировании', () => {
-        const { getByTestId } = render(<TestComponent />);
+  it('useSafeState должен работать как обычный useState при монтировании', () => {
+    function TestComponent() {
+      const ref = useLeakGuard('TestComponent');
+      const [count, setCount] = useSafeState(ref, 'TestComponent', 0);
+      return (
+        <div>
+          <span data-testid="count">{count}</span>
+          <button data-testid="btn" onClick={() => setCount(1)}>
+            Update
+          </button>
+        </div>
+      );
+    }
 
-        expect(getByTestId('count').textContent).toBe('0');
+    const { getByTestId } = render(<TestComponent />);
+    expect(getByTestId('count').textContent).toBe('0');
 
-        act(() => {
-            fireEvent.click(getByTestId('btn'));
-        });
-
-        expect(getByTestId('count').textContent).toBe('1');
+    act(() => {
+      fireEvent.click(getByTestId('btn'));
     });
 
-    it('useSafeState должен блокировать обновления после размонтирования (симуляция утечки)', async () => {
-        const onUnmount = vi.fn();
-        // Шпионим за console.warn, чтобы поймать сообщение от LeakGuard
-        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(getByTestId('count').textContent).toBe('1');
+  });
 
-        const { unmount } = render(<LeakyTestComponent onUnmount={onUnmount} />);
+  it('useSafeState должен блокировать обновления после размонтирования (симуляция утечки)', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-        // Размонтируем компонент ДО того, как сработает setTimeout (100мс)
-        unmount();
+    // Используем безопасный объект-обертку вместо let, чтобы TypeScript не ругался на null
+    const setterRef: { current: (() => void) | null } = { current: null };
 
-        expect(onUnmount).toHaveBeenCalledTimes(1);
+    function TestComponent() {
+      const ref = useLeakGuard('TestComponentCapture');
+      // ИСПРАВЛЕНИЕ: используем [, setCount], чтобы не объявлять неиспользуемую переменную count
+      const [, setCount] = useSafeState(ref, 'TestComponentCapture', 0);
 
-        // Ждем 150мс, чтобы убедиться, что "забытый" setTimeout сработал
-        await new Promise(resolve => setTimeout(resolve, 150));
+      useEffect(() => {
+        // Сохраняем функцию, которая попытается обновить состояние
+        setterRef.current = () => setCount(999);
+      }, [setCount]);
 
-        // Проверяем, что LeakGuard перехватил попытку обновления и вывел предупреждение
-        expect(consoleWarnSpy).toHaveBeenCalledWith(
-            expect.stringContaining('BLOCKED setState on unmounted component')
-        );
+      return <div>Test</div>;
+    }
 
-        // Очищаем шпиона
-        consoleWarnSpy.mockRestore();
+    const { unmount } = render(<TestComponent />);
+
+    // 1. Размонтируем компонент
+    unmount();
+
+    // 2. Пытаемся обновить состояние ПОСЛЕ размонтирования
+    if (setterRef.current) {
+      act(() => {
+        // '!' говорит TypeScript: "Я проверил выше, что это не null, доверяй мне"
+        setterRef.current!();
+      });
+    }
+
+    // 3. Ждем, чтобы асинхронный warning сработал (из-за setTimeout(..., 0) в engine.ts)
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // 4. Проверяем, что LeakGuard перехватил попытку и вывел предупреждение
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('BLOCKED setState on unmounted component'),
+    );
+
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('useLeakGuard должен корректно монтировать и размонтировать компонент без ошибок', () => {
+    function TestComponent() {
+      useLeakGuard('LifecycleTest');
+      return <div data-testid="lifecycle">OK</div>;
+    }
+
+    const { getByTestId, unmount } = render(<TestComponent />);
+    expect(getByTestId('lifecycle').textContent).toBe('OK');
+
+    // Проверка, что размонтирование не вызывает исключений
+    expect(() => unmount()).not.toThrow();
+  });
+
+  it('useSafeState должен работать через LeakGuardProvider без явной передачи ref', () => {
+    function ContextChild() {
+      // Используем хук БЕЗ явной передачи ref, он возьмет его из контекста
+      const [count, setCount] = useSafeState('ContextChild', 0);
+      return (
+        <div>
+          <span data-testid="context-count">{count}</span>
+          <button data-testid="context-btn" onClick={() => setCount((c: number) => c + 1)}>
+            Inc
+          </button>
+        </div>
+      );
+    }
+
+    const { getByTestId } = render(
+      <LeakGuardProvider componentName="Parent">
+        <ContextChild />
+      </LeakGuardProvider>,
+    );
+
+    expect(getByTestId('context-count').textContent).toBe('0');
+
+    act(() => {
+      fireEvent.click(getByTestId('context-btn'));
     });
 
-    it('useLeakGuard должен корректно регистрировать и удалять компонент', () => {
-        const { unmount, rerender } = render(<TestComponent />);
-
-        rerender(<TestComponent />);
-
-        unmount();
-    });
+    expect(getByTestId('context-count').textContent).toBe('1');
+  });
 });

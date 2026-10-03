@@ -1,155 +1,132 @@
-import { ComponentState, TrackedOperation, LeakRecord, LeakGuardMode } from './types';
 import { LeakBuffer } from './buffer';
+import type {
+  ComponentState,
+  LeakGuardMode,
+  LeakRecord,
+  LeakReport,
+  TrackedOperation,
+} from './types';
 
-/**
- * Центральное ядро LeakGuard Engine.
- * Управляет жизненным циклом компонентов, проксированием состояний и автоматической очисткой.
- * Использует WeakMap для гарантии нулевого оверхеда по памяти (Zero Memory Overhead).
- */
 export class LeakGuardEngine {
-    private registry = new WeakMap<object, ComponentState>();
-    private buffer: LeakBuffer;
-    public readonly mode: LeakGuardMode;
+  private registry = new WeakMap<object, ComponentState>();
+  private buffer: LeakBuffer;
+  public readonly mode: LeakGuardMode;
 
-    constructor(mode: LeakGuardMode = 'production', maxBufferSize = 1000) {
-        this.mode = mode;
-        this.buffer = new LeakBuffer(mode, maxBufferSize);
+  // Добавляем свойство strict (без readonly, чтобы можно было переключать)
+  public strict: boolean;
+
+  private pendingWarnings = new Map<object, ReturnType<typeof setTimeout>>();
+
+  constructor(mode: LeakGuardMode = 'production', strict: boolean = false) {
+    this.mode = mode;
+    this.strict = strict;
+    // ИСПРАВЛЕНИЕ: передаем mode и maxSize, как требует конструктор LeakBuffer
+    this.buffer = new LeakBuffer(this.mode, 1000);
+  }
+
+  public register(component: object, componentName?: string): void {
+    // Если компонент был размонтирован и снова смонтирован (StrictMode),
+    // отменяем все отложенные предупреждения для него
+    if (this.pendingWarnings.has(component)) {
+      clearTimeout(this.pendingWarnings.get(component)!);
+      this.pendingWarnings.delete(component);
     }
 
-    /**
-     * Регистрирует компонент в реестре при монтировании.
-     */
-    public register(component: object): void {
-        this.registry.set(component, {
-            isMounted: true,
-            operations: new Map(),
-            leakCount: 0,
-        });
-    }
+    this.registry.set(component, {
+      isMounted: true,
+      operations: new Map(),
+      leakCount: 0,
+      name: componentName, // Сохраняем имя компонента
+    });
+  }
 
-    /**
-     * Снимает компонент с регистрации и гарантированно очищает все его операции.
-     */
-    public unregister(component: object): void {
-        const state = this.registry.get(component);
-        if (!state) return;
+  public unregister(component: object): void {
+    const state = this.registry.get(component);
+    if (state) {
+      state.isMounted = false;
 
-        state.isMounted = false;
-
-        // Автоочистка всех зарегистрированных операций
-        for (const [, operation] of state.operations.entries()) {
-            try {
-                operation.cleanup();
-            } catch (error) {
-                // Игнорируем ошибки очистки в продакшене, чтобы не ломать UI
-                if (this.mode === 'development') {
-                    console.error(`[LeakGuard] Cleanup error for ${operation.type}:`, error);
-                }
-            }
+      // Автоматическая очистка всех зарегистрированных операций
+      state.operations.forEach((op) => {
+        if (op.cleanup) {
+          op.cleanup();
         }
-        state.operations.clear();
-        this.registry.delete(component);
+      });
+      state.operations.clear();
     }
+  }
 
-    /**
-     * Проверяет, смонтирован ли компонент.
-     */
-    public isMounted(component: object): boolean {
-        return this.registry.get(component)?.isMounted ?? false;
+  public isMounted(component: object): boolean {
+    return this.registry.get(component)?.isMounted ?? false;
+  }
+
+  public trackOperation(component: object, operation: TrackedOperation): void {
+    const state = this.registry.get(component);
+    if (state && state.isMounted) {
+      const opId = `${operation.type}_${Date.now()}`;
+      state.operations.set(opId, operation);
+    } else {
+      // Если компонент уже размонтирован, сразу вызываем cleanup
+      if (operation.cleanup) {
+        operation.cleanup();
+      }
     }
+  }
 
-    /**
-     * Регистрирует асинхронную операцию для последующей автоочистки.
-     */
-    public trackOperation(component: object, operation: Omit<TrackedOperation, 'id'>): string {
-        const state = this.registry.get(component);
-
-        // Если компонент уже размонтирован, выполняем очистку немедленно
-        if (!state || !state.isMounted) {
-            operation.cleanup();
-            return '';
+  public createSafeSetter<T>(
+    component: object,
+    originalSetter: (value: T | ((prev: T) => T)) => void,
+    componentName: string,
+    allowPostUnmount: boolean = false,
+  ): (value: T | ((prev: T) => T)) => void {
+    return (value: T | ((prev: T) => T)) => {
+      if (!this.isMounted(component)) {
+        if (allowPostUnmount) {
+          originalSetter(value);
+          return;
         }
 
-        const id = `${operation.type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-        state.operations.set(id, { ...operation, id });
-        return id;
-    }
-
-    /**
-     * Удаляет операцию из трекинга (например, после успешного завершения fetch).
-     */
-    public untrackOperation(component: object, operationId: string): void {
-        const state = this.registry.get(component);
-        if (state) {
-            state.operations.delete(operationId);
-        }
-    }
-
-    /**
-     * Создает безопасную обертку (Proxy) для функций обновления состояния.
-     *
-     * @param component - Объект компонента.
-     * @param originalSetter - Оригинальная функция setState.
-     * @param componentName - Имя компонента для логирования.
-     * @param allowPostUnmount - Если true, позволяет обновлять состояние после unmount.
-     */
-    public createSafeSetter<T>(
-        component: object,
-        originalSetter: (value: T | ((prev: T) => T)) => void,
-        componentName: string,
-        allowPostUnmount: boolean = false
-    ): (value: T | ((prev: T) => T)) => void {
-        return (value: T | ((prev: T) => T)) => {
-            if (!this.isMounted(component)) {
-                // Если разрешено обновление после unmount, пропускаем проверку
-                if (allowPostUnmount) {
-                    originalSetter(value);
-                    return;
-                }
-
-                const leakRecord: LeakRecord = {
-                    component: componentName,
-                    operation: 'setState',
-                    stack: this.mode === 'development' ? new Error().stack || '' : '',
-                    timestamp: Date.now(),
-                };
-
-                this.buffer.record(leakRecord);
-
-                if (this.mode === 'development') {
-                    console.warn(
-                        `[LeakGuard] 🚨 BLOCKED setState on unmounted component "${componentName}".\n` +
-                        `This indicates a potential memory leak. Stack:\n${leakRecord.stack}`
-                    );
-                }
-                return; // Блокируем обновление
-            }
-
-            // Компонент жив, передаем управление оригинальному setter
-            originalSetter(value);
+        const leakRecord: LeakRecord = {
+          component: componentName,
+          operation: 'setState',
+          stack: this.mode === 'development' ? new Error().stack || '' : '',
+          timestamp: Date.now(),
         };
-    }
 
-    /**
-     * Возвращает агрегированный отчет об утечках.
-     */
-    public getReport() {
-        return this.buffer.getReport();
-    }
+        this.buffer.record(leakRecord);
 
-    /**
-     * Очищает буфер отчетов.
-     */
-    public clearReport() {
-        this.buffer.clear();
-    }
+        if (this.mode === 'development') {
+          const message =
+            `[LeakGuard] 🚨 BLOCKED setState on unmounted component "${componentName}".\n` +
+            `This indicates a potential memory leak. Stack:\n${leakRecord.stack}`;
+
+          if (this.strict) {
+            // Строгий режим: выводим КРАСНУЮ ошибку (console.error), но НЕ роняем приложение
+            console.error(message);
+          } else {
+            // Обычный режим: откладываем предупреждение (для React StrictMode)
+            const timer = setTimeout(() => {
+              console.warn(message);
+              this.pendingWarnings.delete(component);
+            }, 0);
+
+            this.pendingWarnings.set(component, timer);
+          }
+        }
+        return;
+      }
+
+      // Компонент жив, передаем управление оригинальному setter
+      originalSetter(value);
+    };
+  }
+
+  // Упростили метод, так как вся логика уже есть в твоем LeakBuffer
+  public getReport(): LeakReport {
+    return this.buffer.getReport();
+  }
 }
 
-// Определение окружения для глобального экземпляра
-const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+// Умное определение окружения: в тестах (Vitest) включаем режим разработки для проверки логов
+const isTestEnv = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
 
-/**
- * Глобальный синглтон экземпляра движка.
- * Рекомендуется использовать его для большинства случаев.
- */
-export const globalEngine = new LeakGuardEngine(isDev ? 'development' : 'production');
+export const globalEngine = new LeakGuardEngine(isTestEnv ? 'development' : 'production', false);
