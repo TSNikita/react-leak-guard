@@ -81,3 +81,28 @@ describe('LeakGuardEngine', () => {
         expect(report.byOperation['setState']).toBe(1);
     });
 });
+
+it('createSafeSetter должен позволять обновления после unmount если allowPostUnmount=true', () => {
+    const engine = new LeakGuardEngine('development');
+    const component = {};
+    const originalSetter = vi.fn();
+
+    engine.register(component);
+    const safeSetter = engine.createSafeSetter(
+        component,
+        originalSetter,
+        'TestComp',
+        true // allowPostUnmount
+    );
+
+    // Вызов ДО unmount должен пройти
+    safeSetter(42);
+    expect(originalSetter).toHaveBeenCalledWith(42);
+
+    // Размонтируем компонент
+    engine.unregister(component);
+
+    // Вызов ПОСЛЕ unmount ДОЛЖЕН пройти (allowPostUnmount=true)
+    safeSetter(100);
+    expect(originalSetter).toHaveBeenCalledTimes(2); // Вызвался второй раз!
+});

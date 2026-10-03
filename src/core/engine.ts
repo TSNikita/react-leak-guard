@@ -87,14 +87,26 @@ export class LeakGuardEngine {
 
     /**
      * Создает безопасную обертку (Proxy) для функций обновления состояния.
+     *
+     * @param component - Объект компонента.
+     * @param originalSetter - Оригинальная функция setState.
+     * @param componentName - Имя компонента для логирования.
+     * @param allowPostUnmount - Если true, позволяет обновлять состояние после unmount.
      */
     public createSafeSetter<T>(
         component: object,
         originalSetter: (value: T | ((prev: T) => T)) => void,
-        componentName: string
+        componentName: string,
+        allowPostUnmount: boolean = false
     ): (value: T | ((prev: T) => T)) => void {
         return (value: T | ((prev: T) => T)) => {
             if (!this.isMounted(component)) {
+                // Если разрешено обновление после unmount, пропускаем проверку
+                if (allowPostUnmount) {
+                    originalSetter(value);
+                    return;
+                }
+
                 const leakRecord: LeakRecord = {
                     component: componentName,
                     operation: 'setState',
