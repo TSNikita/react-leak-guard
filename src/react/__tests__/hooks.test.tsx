@@ -3,6 +3,8 @@ import React, { useEffect } from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
 import { LeakGuardProvider, useLeakGuard } from '../useLeakGuard';
 import { useSafeState } from '../useSafeState';
+import { useSafeTimeout } from '../useSafeTimeout';
+import { useSafeEventListener } from '../useSafeEventListener';
 
 describe('React Hooks', () => {
   it('useSafeState должен работать как обычный useState при монтировании', () => {
@@ -31,17 +33,13 @@ describe('React Hooks', () => {
 
   it('useSafeState должен блокировать обновления после размонтирования (симуляция утечки)', async () => {
     const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    // Используем безопасный объект-обертку вместо let, чтобы TypeScript не ругался на null
     const setterRef: { current: (() => void) | null } = { current: null };
 
     function TestComponent() {
       const ref = useLeakGuard('TestComponentCapture');
-      // ИСПРАВЛЕНИЕ: используем [, setCount], чтобы не объявлять неиспользуемую переменную count
       const [, setCount] = useSafeState(ref, 'TestComponentCapture', 0);
 
       useEffect(() => {
-        // Сохраняем функцию, которая попытается обновить состояние
         setterRef.current = () => setCount(999);
       }, [setCount]);
 
@@ -49,22 +47,16 @@ describe('React Hooks', () => {
     }
 
     const { unmount } = render(<TestComponent />);
-
-    // 1. Размонтируем компонент
     unmount();
 
-    // 2. Пытаемся обновить состояние ПОСЛЕ размонтирования
     if (setterRef.current) {
       act(() => {
-        // '!' говорит TypeScript: "Я проверил выше, что это не null, доверяй мне"
         setterRef.current!();
       });
     }
 
-    // 3. Ждем, чтобы асинхронный warning сработал (из-за setTimeout(..., 0) в engine.ts)
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    // 4. Проверяем, что LeakGuard перехватил попытку и вывел предупреждение
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining('BLOCKED setState on unmounted component'),
     );
@@ -81,13 +73,11 @@ describe('React Hooks', () => {
     const { getByTestId, unmount } = render(<TestComponent />);
     expect(getByTestId('lifecycle').textContent).toBe('OK');
 
-    // Проверка, что размонтирование не вызывает исключений
     expect(() => unmount()).not.toThrow();
   });
 
   it('useSafeState должен работать через LeakGuardProvider без явной передачи ref', () => {
     function ContextChild() {
-      // Используем хук БЕЗ явной передачи ref, он возьмет его из контекста
       const [count, setCount] = useSafeState('ContextChild', 0);
       return (
         <div>
@@ -112,5 +102,61 @@ describe('React Hooks', () => {
     });
 
     expect(getByTestId('context-count').textContent).toBe('1');
+  });
+
+  it('useSafeTimeout должен работать через LeakGuardProvider и предотвращать выполнение колбэка после unmount', async () => {
+    vi.useFakeTimers();
+    const mockCallback = vi.fn();
+
+    function ContextChild() {
+      // Используем БЕЗ явного ref, берем из контекста
+      useSafeTimeout(mockCallback, 1000);
+      return <div>Test</div>;
+    }
+
+    const { unmount } = render(
+      <LeakGuardProvider componentName="TimerParent">
+        <ContextChild />
+      </LeakGuardProvider>,
+    );
+
+    // 1. Размонтируем компонент ДО того, как таймер сработает
+    unmount();
+
+    // 2. Проматываем время вперед (таймер должен был сработать)
+    vi.advanceTimersByTime(1000);
+    await vi.runAllTimersAsync();
+
+    // 3. ГЛАВНАЯ ПРОВЕРКА: Колбэк НЕ должен был быть вызван,
+    // потому что useSafeTimeout автоматически вызвал clearTimeout при unmount!
+    expect(mockCallback).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it('useSafeEventListener должен автоматически очищать слушатель при unmount через контекст', () => {
+    const addSpy = vi.spyOn(window, 'addEventListener');
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+
+    function ContextChild() {
+      const handler = () => {};
+      useSafeEventListener(window, 'resize', handler);
+      return <div>Test</div>;
+    }
+
+    const { unmount } = render(
+      <LeakGuardProvider componentName="EventParent">
+        <ContextChild />
+      </LeakGuardProvider>,
+    );
+
+    expect(addSpy).toHaveBeenCalledWith('resize', expect.any(Function), undefined);
+
+    unmount();
+
+    expect(removeSpy).toHaveBeenCalledWith('resize', expect.any(Function), undefined);
+
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
   });
 });

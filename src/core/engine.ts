@@ -59,16 +59,27 @@ export class LeakGuardEngine {
     return this.registry.get(component)?.isMounted ?? false;
   }
 
-  public trackOperation(component: object, operation: TrackedOperation): void {
+  public trackOperation(component: object, operation: TrackedOperation): string | undefined {
     const state = this.registry.get(component);
     if (state && state.isMounted) {
-      const opId = `${operation.type}_${Date.now()}`;
+      // Генерируем уникальный ID для операции
+      const opId = `${operation.type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      operation.id = opId; // Сохраняем ID в сам объект операции
       state.operations.set(opId, operation);
+      return opId; // Возвращаем ID
     } else {
       // Если компонент уже размонтирован, сразу вызываем cleanup
       if (operation.cleanup) {
         operation.cleanup();
       }
+      return undefined;
+    }
+  }
+
+  public untrackOperation(component: object, opId: string): void {
+    const state = this.registry.get(component);
+    if (state) {
+      state.operations.delete(opId); // Удаляем операцию из активных
     }
   }
 
