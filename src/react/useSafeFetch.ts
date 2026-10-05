@@ -10,10 +10,11 @@ export function useSafeFetch(componentRef: object) {
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const controller = new AbortController();
 
+      // Теперь trackOperation возвращает ID, который мы можем использовать
       const operationId = globalEngine.trackOperation(componentRef, {
         type: 'fetch',
         cleanup: () => controller.abort(),
-        source: new Error().stack?.split('\n')[2]?.trim() || 'unknown',
+        source: 'useSafeFetch',
       });
 
       try {
@@ -22,14 +23,14 @@ export function useSafeFetch(componentRef: object) {
           signal: controller.signal,
         });
 
-        // Если запрос успешен, убираем его из трекинга (опционально,
-        // но полезно для точной статистики активных операций)
+        // Если запрос успешен, убираем его из трекинга активных операций
         if (operationId) {
           globalEngine.untrackOperation(componentRef, operationId);
         }
 
         return response;
       } catch (error) {
+        // При ошибке (включая AbortError при размонтировании) тоже убираем из трекинга
         if (operationId) {
           globalEngine.untrackOperation(componentRef, operationId);
         }
