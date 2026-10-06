@@ -2,16 +2,16 @@ import { useContext, useEffect } from 'react';
 import { globalEngine } from '../core/engine';
 import { LeakGuardContext } from './LeakGuardContext';
 
-// Перегрузка 1: Явный режим (с ref)
+// Перегрузка 1: Явный режим (с ref) - СТРОГО типизирована
 export function useSafeTimeout(componentRef: object, callback: () => void, delay: number): void;
-// Перегрузка 2: Контекстный режим (без ref, берет из LeakGuardProvider)
+// Перегрузка 2: Контекстный режим (без ref) - СТРОГО типизирована
 export function useSafeTimeout(callback: () => void, delay: number): void;
 
-// Реализация
+// Реализация (используем any ТОЛЬКО внутри, чтобы обойти строгую проверку TS при перегрузках)
+// Публичный API остается строго типизированным!
 export function useSafeTimeout(arg1: any, arg2: any, arg3?: number): void {
   let componentRef: object;
   let callback: () => void;
-  // ИСПРАВЛЕНИЕ: инициализируем delay нулем, чтобы TS не ругался на undefined
   let delay: number = 0;
 
   if (typeof arg1 === 'function') {
@@ -28,8 +28,16 @@ export function useSafeTimeout(arg1: any, arg2: any, arg3?: number): void {
     // Явный режим
     componentRef = arg1;
     callback = arg2;
-    // ИСПРАВЛЕНИЕ: используем ?? 0 на случай, если arg3 не передан
     delay = arg3 ?? 0;
+  }
+
+  // ОПТИМИЗАЦИЯ: В продакшене с disableInProduction используем нативный setTimeout
+  if (globalEngine.disableInProduction && globalEngine.mode === 'production') {
+    useEffect(() => {
+      const timerId = setTimeout(callback, delay);
+      return () => clearTimeout(timerId);
+    }, [callback, delay]);
+    return;
   }
 
   useEffect(() => {

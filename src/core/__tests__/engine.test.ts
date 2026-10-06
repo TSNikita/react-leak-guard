@@ -174,4 +174,12 @@ describe('LeakGuardEngine', () => {
 
     consoleErrorSpy.mockRestore();
   });
+
+  it('должен поддерживать режим disableInProduction для нулевого оверхеда', () => {
+    // Создаем движок с disableInProduction = true
+    const engine = new LeakGuardEngine('production', false, true);
+
+    expect(engine.disableInProduction).toBe(true);
+    expect(engine.mode).toBe('production');
+  });
 });
