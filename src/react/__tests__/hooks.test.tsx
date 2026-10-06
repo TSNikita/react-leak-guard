@@ -5,6 +5,7 @@ import { LeakGuardProvider, useLeakGuard } from '../useLeakGuard';
 import { useSafeState } from '../useSafeState';
 import { useSafeTimeout } from '../useSafeTimeout';
 import { useSafeEventListener } from '../useSafeEventListener';
+import { useSafeWebSocket } from '../useSafeWebSocket';
 
 describe('React Hooks', () => {
   it('useSafeState должен работать как обычный useState при монтировании', () => {
@@ -158,5 +159,65 @@ describe('React Hooks', () => {
 
     addSpy.mockRestore();
     removeSpy.mockRestore();
+  });
+
+  it('useSafeWebSocket должен работать через LeakGuardProvider и закрывать соединение при unmount', () => {
+    const mockWebSocket = {
+      close: vi.fn(),
+      readyState: 1, // OPEN
+    };
+    vi.spyOn(global, 'WebSocket').mockImplementation(() => mockWebSocket as any);
+
+    function ContextChild() {
+      useSafeWebSocket('ws://localhost:8080');
+      return <div>Test</div>;
+    }
+
+    const { unmount } = render(
+      <LeakGuardProvider componentName="WebSocketParent">
+        <ContextChild />
+      </LeakGuardProvider>,
+    );
+
+    unmount();
+
+    expect(mockWebSocket.close).toHaveBeenCalledWith(
+      1000,
+      'Component unmounted - LeakGuard cleanup',
+    );
+  });
+
+  it('useSafeWebSocket должен работать через LeakGuardProvider и закрывать соединение при unmount', () => {
+    const mockWebSocket = {
+      close: vi.fn(),
+      readyState: 1, // OPEN
+    };
+
+    // Создаем полный мок WebSocket с конструктором
+    const MockWebSocket = vi.fn(() => mockWebSocket);
+
+    // Используем stubGlobal для надёжной подмены
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    function ContextChild() {
+      useSafeWebSocket('ws://localhost:8080');
+      return <div>Test</div>;
+    }
+
+    const { unmount } = render(
+      <LeakGuardProvider componentName="WebSocketParent">
+        <ContextChild />
+      </LeakGuardProvider>,
+    );
+
+    unmount();
+
+    expect(mockWebSocket.close).toHaveBeenCalledWith(
+      1000,
+      'Component unmounted - LeakGuard cleanup',
+    );
+
+    // Очистка мока
+    vi.unstubAllGlobals();
   });
 });

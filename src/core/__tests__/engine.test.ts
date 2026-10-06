@@ -182,4 +182,22 @@ describe('LeakGuardEngine', () => {
     expect(engine.disableInProduction).toBe(true);
     expect(engine.mode).toBe('production');
   });
+
+  it('environment.ts должен корректно определять браузерную среду', async () => {
+    const { isBrowser, isServer } = await import('../environment');
+
+    // В тестовой среде Vitest (jsdom) мы в "браузере"
+    expect(isBrowser).toBe(true);
+    expect(isServer).toBe(false);
+  });
+
+  it('движок не должен падать при вызове методов с несуществующим компонентом', () => {
+    const engine = new LeakGuardEngine('production');
+    const fakeComponent = {};
+
+    // Эти вызовы не должны выбрасывать ошибок
+    expect(() => engine.unregister(fakeComponent)).not.toThrow();
+    expect(() => engine.untrackOperation(fakeComponent, 'fake-id')).not.toThrow();
+    expect(engine.isMounted(fakeComponent)).toBe(false);
+  });
 });
