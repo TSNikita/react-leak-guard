@@ -11,22 +11,23 @@ export class LeakGuardEngine {
   private registry = new WeakMap<object, ComponentState>();
   private buffer: LeakBuffer;
   public readonly mode: LeakGuardMode;
-
-  // Добавляем свойство strict (без readonly, чтобы можно было переключать)
   public strict: boolean;
+  public disableInProduction: boolean; // <-- Новая опция
 
   private pendingWarnings = new Map<object, ReturnType<typeof setTimeout>>();
 
-  constructor(mode: LeakGuardMode = 'production', strict: boolean = false) {
+  constructor(
+    mode: LeakGuardMode = 'production',
+    strict: boolean = false,
+    disableInProduction: boolean = false,
+  ) {
     this.mode = mode;
     this.strict = strict;
-    // ИСПРАВЛЕНИЕ: передаем mode и maxSize, как требует конструктор LeakBuffer
+    this.disableInProduction = disableInProduction; // <-- Сохраняем
     this.buffer = new LeakBuffer(this.mode, 1000);
   }
 
   public register(component: object, componentName?: string): void {
-    // Если компонент был размонтирован и снова смонтирован (StrictMode),
-    // отменяем все отложенные предупреждения для него
     if (this.pendingWarnings.has(component)) {
       clearTimeout(this.pendingWarnings.get(component)!);
       this.pendingWarnings.delete(component);
@@ -36,7 +37,7 @@ export class LeakGuardEngine {
       isMounted: true,
       operations: new Map(),
       leakCount: 0,
-      name: componentName, // Сохраняем имя компонента
+      name: componentName,
     });
   }
 
@@ -45,7 +46,6 @@ export class LeakGuardEngine {
     if (state) {
       state.isMounted = false;
 
-      // Автоматическая очистка всех зарегистрированных операций
       state.operations.forEach((op) => {
         if (op.cleanup) {
           op.cleanup();
@@ -62,13 +62,11 @@ export class LeakGuardEngine {
   public trackOperation(component: object, operation: TrackedOperation): string | undefined {
     const state = this.registry.get(component);
     if (state && state.isMounted) {
-      // Генерируем уникальный ID для операции
       const opId = `${operation.type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      operation.id = opId; // Сохраняем ID в сам объект операции
+      operation.id = opId;
       state.operations.set(opId, operation);
-      return opId; // Возвращаем ID
+      return opId;
     } else {
-      // Если компонент уже размонтирован, сразу вызываем cleanup
       if (operation.cleanup) {
         operation.cleanup();
       }
@@ -79,7 +77,7 @@ export class LeakGuardEngine {
   public untrackOperation(component: object, opId: string): void {
     const state = this.registry.get(component);
     if (state) {
-      state.operations.delete(opId); // Удаляем операцию из активных
+      state.operations.delete(opId);
     }
   }
 
@@ -111,10 +109,8 @@ export class LeakGuardEngine {
             `This indicates a potential memory leak. Stack:\n${leakRecord.stack}`;
 
           if (this.strict) {
-            // Строгий режим: выводим КРАСНУЮ ошибку (console.error), но НЕ роняем приложение
             console.error(message);
           } else {
-            // Обычный режим: откладываем предупреждение (для React StrictMode)
             const timer = setTimeout(() => {
               console.warn(message);
               this.pendingWarnings.delete(component);
@@ -126,18 +122,20 @@ export class LeakGuardEngine {
         return;
       }
 
-      // Компонент жив, передаем управление оригинальному setter
       originalSetter(value);
     };
   }
 
-  // Упростили метод, так как вся логика уже есть в твоем LeakBuffer
   public getReport(): LeakReport {
     return this.buffer.getReport();
   }
 }
 
-// Умное определение окружения: в тестах (Vitest) включаем режим разработки для проверки логов
+// Умное определение окружения: в тестах включаем режим разработки
 const isTestEnv = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
 
-export const globalEngine = new LeakGuardEngine(isTestEnv ? 'development' : 'production', false);
+export const globalEngine = new LeakGuardEngine(
+  isTestEnv ? 'development' : 'production',
+  false,
+  false, // disableInProduction по умолчанию выключен
+);

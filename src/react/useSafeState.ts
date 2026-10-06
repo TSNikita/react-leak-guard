@@ -1,12 +1,12 @@
-import { Dispatch, SetStateAction, useContext, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useContext, useDebugValue, useRef, useState } from 'react';
 import { globalEngine } from '../core/engine';
-import { LeakGuardContext } from './LeakGuardContext';
+import { LeakGuardContext as LGContext } from './LeakGuardContext';
 
 export interface UseSafeStateOptions {
   allowPostUnmount?: boolean;
 }
 
-// Перегрузки для TypeScript
+// Перегрузка 1: Явный режим
 export function useSafeState<T>(
   componentRef: object,
   componentName: string,
@@ -14,13 +14,14 @@ export function useSafeState<T>(
   options?: UseSafeStateOptions,
 ): [T, Dispatch<SetStateAction<T>>];
 
+// Перегрузка 2: Контекстный режим
 export function useSafeState<T>(
   componentName: string,
   initialState: T | (() => T),
   options?: UseSafeStateOptions,
 ): [T, Dispatch<SetStateAction<T>>];
 
-// Реализация
+// Реализация с union types вместо any
 export function useSafeState<T>(
   arg1: object | string,
   arg2: string | T | (() => T),
@@ -32,10 +33,10 @@ export function useSafeState<T>(
   let initialState: T | (() => T);
   let options: UseSafeStateOptions = {};
 
-  // Определяем режим вызова (Явный или Контекстный)
+  // Type guard: проверяем, является ли arg1 строкой (именем компонента)
   if (typeof arg1 === 'string') {
-    // Режим Контекста: useSafeState('Name', initialState, options)
-    componentRef = useContext(LeakGuardContext)!;
+    // Контекстный режим
+    componentRef = useContext(LGContext)!;
     if (!componentRef) {
       throw new Error(
         'useSafeState: componentRef not found in context. Wrap your app in <LeakGuardProvider>.',
@@ -43,27 +44,33 @@ export function useSafeState<T>(
     }
     componentName = arg1;
     initialState = arg2 as T | (() => T);
-    if (
-      arg3 &&
-      typeof arg3 === 'object' &&
-      !('value' in (arg3 as unknown as Record<string, unknown>))
-    ) {
+
+    // Проверяем, является ли arg3 опциями
+    if (arg3 && typeof arg3 === 'object' && !Array.isArray(arg3) && typeof arg3 !== 'function') {
       options = arg3 as UseSafeStateOptions;
     }
   } else {
-    // Явный режим: useSafeState(ref, 'Name', initialState, options)
+    // Явный режим
     componentRef = arg1;
     componentName = arg2 as string;
     initialState = arg3 as T | (() => T);
     options = arg4 || {};
   }
 
-  const [state, setState] = useState(initialState);
   const { allowPostUnmount = false } = options;
 
+  // ОПТИМИЗАЦИЯ: В продакшене с disableInProduction возвращаем нативный useState
+  if (globalEngine.disableInProduction && globalEngine.mode === 'production') {
+    return useState(initialState);
+  }
+
+  const [state, setState] = useState(initialState);
   const safeSetState = useRef(
     globalEngine.createSafeSetter(componentRef, setState, componentName, allowPostUnmount),
   ).current;
+
+  const isMounted = globalEngine.isMounted(componentRef);
+  useDebugValue(isMounted ? `Active (${componentName})` : `Unmounted (${componentName})`);
 
   return [state, safeSetState];
 }
