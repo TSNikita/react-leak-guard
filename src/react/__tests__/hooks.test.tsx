@@ -6,6 +6,7 @@ import { useSafeState } from '../useSafeState';
 import { useSafeTimeout } from '../useSafeTimeout';
 import { useSafeEventListener } from '../useSafeEventListener';
 import { useSafeWebSocket } from '../useSafeWebSocket';
+import { withLeakGuard } from '../withLeakGuard';
 
 describe('React Hooks', () => {
   it('useSafeState должен работать как обычный useState при монтировании', () => {
@@ -219,5 +220,22 @@ describe('React Hooks', () => {
 
     // Очистка мока
     vi.unstubAllGlobals();
+  });
+
+  it('withLeakGuard должен регистрировать классовый компонент и корректно его размонтировать', () => {
+    class ClassComponent extends React.Component<{ leakGuardRef?: object }> {
+      render() {
+        return <div data-testid="class-component">Class Component</div>;
+      }
+    }
+
+    const WrappedComponent = withLeakGuard(ClassComponent, 'ClassTestComponent');
+
+    const { getByTestId, unmount } = render(<WrappedComponent />);
+
+    expect(getByTestId('class-component').textContent).toBe('Class Component');
+
+    // Проверка, что размонтирование не вызывает ошибок
+    expect(() => unmount()).not.toThrow();
   });
 });
