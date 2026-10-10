@@ -200,4 +200,32 @@ describe('LeakGuardEngine', () => {
     expect(() => engine.untrackOperation(fakeComponent, 'fake-id')).not.toThrow();
     expect(engine.isMounted(fakeComponent)).toBe(false);
   });
+
+  it('должен полностью отключать проверки и логи при включении setTestingMode', () => {
+    const engine = new LeakGuardEngine('development', true); // strict mode для проверки
+    const component = {};
+    const originalSetter = vi.fn();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Включаем режим тестирования
+    engine.setTestingMode(true);
+
+    engine.register(component);
+    const safeSetter = engine.createSafeSetter(component, originalSetter, 'TestComp');
+
+    engine.unregister(component);
+
+    // Пытаемся обновить после unmount
+    safeSetter(100);
+
+    // В режиме тестирования:
+    // 1. Setter должен сработать как нативный (без блокировки)
+    expect(originalSetter).toHaveBeenCalledWith(100);
+    // 2. Ошибок в консоль быть не должно
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    // 3. Компонент считается "смонтированным"
+    expect(engine.isMounted(component)).toBe(true);
+
+    consoleErrorSpy.mockRestore();
+  });
 });
