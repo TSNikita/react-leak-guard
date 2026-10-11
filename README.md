@@ -400,7 +400,7 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ```bash
 # Clone the repo
-git clone https://github.com/yourusername/react-leak-guard.git
+git clone https://github.com/TSNikita/react-leak-guard.git
 
 # Install dependencies
 npm install
