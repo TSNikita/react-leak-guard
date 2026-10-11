@@ -1,0 +1,39 @@
+name: CI
+
+# Запускаем workflow при push и pull request в основные ветки
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # Тестируем на двух актуальных LTS версиях Node.js для надёжности
+    strategy:
+      matrix:
+        node-version: [ 18.x, 20.x ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm' # Кэшируем зависимости для ускорения следующих запусков
+
+      - name: Install dependencies
+        run: npm ci # 'ci' быстрее и надёжнее, чем 'install', для CI-среды
+
+      - name: Run Linter
+        run: npm run lint
+
+      - name: Run Tests
+        run: npm run test:run
+
+      - name: Build project
+        run: npm run build
