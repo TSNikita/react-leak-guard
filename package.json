@@ -1,6 +1,7 @@
 {
   "name": "react-leak-guard",
   "version": "1.0.0",
+  "license": "MIT",
   "description": "Automatic memory leak prevention for React applications",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
