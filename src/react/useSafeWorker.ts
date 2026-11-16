@@ -1,4 +1,4 @@
-import { useEffect, useRef, useContext } from 'react';
+import { useEffect, useState, useContext } from 'react';
 import { globalEngine } from '../core/engine';
 import { LeakGuardContext } from './LeakGuardContext';
 
@@ -7,17 +7,17 @@ export function useSafeWorker(
   componentRef: object,
   workerUrl: string | URL,
   options?: WorkerOptions,
-): Worker;
+): Worker | null;
 
 // Перегрузка 2: Контекстный режим
-export function useSafeWorker(workerUrl: string | URL, options?: WorkerOptions): Worker;
+export function useSafeWorker(workerUrl: string | URL, options?: WorkerOptions): Worker | null;
 
 // Реализация
 export function useSafeWorker(
   arg1: object | string | URL,
   arg2?: string | URL | WorkerOptions,
   arg3?: WorkerOptions,
-): Worker {
+): Worker | null {
   let componentRef: object;
   let workerUrl: string | URL;
   let options: WorkerOptions | undefined;
@@ -39,39 +39,44 @@ export function useSafeWorker(
     options = arg3;
   }
 
-  const workerRef = useRef<Worker | null>(null);
+  const [worker, setWorker] = useState<Worker | null>(null);
 
   // ОПТИМИЗАЦИЯ: В продакшене с disableInProduction используем нативный Worker
   if (globalEngine.disableInProduction && globalEngine.mode === 'production') {
     useEffect(() => {
       const worker = new Worker(workerUrl, options);
-      workerRef.current = worker;
+      setWorker(worker);
       return () => {
         worker.terminate();
       };
     }, [workerUrl, options]);
-    return workerRef.current!;
+    return worker;
   }
 
   useEffect(() => {
     const worker = new Worker(workerUrl, options);
-    workerRef.current = worker;
+    setWorker(worker);
 
+    let terminated = false;
+    const terminate = () => {
+      if (!terminated) {
+        terminated = true;
+        worker.terminate();
+      }
+    };
     const operationId = globalEngine.trackOperation(componentRef, {
       type: 'worker',
-      cleanup: () => {
-        worker.terminate();
-      },
+      cleanup: terminate,
       source: 'useSafeWorker',
     });
 
     return () => {
-      worker.terminate();
+      terminate();
       if (operationId) {
         globalEngine.untrackOperation(componentRef, operationId);
       }
     };
   }, [workerUrl, options, componentRef]);
 
-  return workerRef.current!;
+  return worker;
 }
