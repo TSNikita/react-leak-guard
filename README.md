@@ -31,13 +31,13 @@ function Counter() {
 }
 ```
 
-`useLeakGuard` registers the reference in an effect and unregisters it during cleanup. The engine calls cleanup functions for operations still tracked under that reference. The timeout hook also clears its own timer when its effect is cleaned up. A changing callback or delay restarts the timeout; use a stable callback when that is not desired.
+`useLeakGuard` registers the reference in a layout effect in the browser and unregisters it during cleanup. The engine calls cleanup functions for operations still tracked under that reference. The timeout hook also clears its own timer when its effect is cleaned up. A changing callback or delay restarts the timeout; use a stable callback when that is not desired.
 
 ## Hooks
 
 ### `useLeakGuard(componentName)`
 
-Returns a stable object identifying the component to the global engine. Pass it to the explicit-reference forms below. Registration occurs in an effect, so invoke tracked operations after registration, such as in an effect declared after `useLeakGuard` or in a user event.
+Returns a stable object identifying the component to the global engine. Pass it to the explicit-reference forms below. Registration occurs in a layout effect in the browser, so invoke tracked operations after registration, such as in an effect declared after `useLeakGuard` or in a user event.
 
 ### `useSafeState`
 
@@ -133,7 +133,21 @@ On the server the engine skips registration and tracking and returns the origina
 - `withLeakGuard(Component, name)` wraps a component, registers a guard and passes it as the `leakGuardRef` prop. The wrapped component must use that reference for tracked operations; wrapping alone does not clean up arbitrary work.
 - `LeakGuardEngine`, `LeakBuffer` and associated TypeScript types are exported for advanced use. The React hooks use the shared `globalEngine`.
 
-WebSocket and Worker hooks exist in the source tree but are not currently exported by the package entry point, so they are not part of the public API described here.
+### `useSafeWebSocket` and `useSafeWorker`
+
+Both hooks return `null` until their resource is created in an effect, then rerender with the resource. Check for `null` before using it and attach handlers in an effect. Use stable protocol arrays and worker options to avoid recreating resources on every render.
+
+```tsx
+const socket = useSafeWebSocket(guard, 'wss://example.com');
+useEffect(() => {
+  if (!socket) return;
+  const onMessage = (event: MessageEvent) => console.log(event.data);
+  socket.addEventListener('message', onMessage);
+  return () => socket.removeEventListener('message', onMessage);
+}, [socket]);
+```
+
+`useSafeWorker(guard, '/worker.js')` similarly returns `Worker | null`. Both hooks clean up their own resource on effect cleanup. Context overloads are also available; see the context lifetime limitations above.
 
 ## Development
 

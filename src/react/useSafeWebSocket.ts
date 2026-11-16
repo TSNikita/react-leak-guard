@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { globalEngine } from '../core/engine';
 import { LeakGuardContext } from './LeakGuardContext';
 
@@ -11,17 +11,17 @@ export function useSafeWebSocket(
   componentRef: object,
   url: string,
   protocols?: string | string[],
-): WebSocket;
+): WebSocket | null;
 
 // Перегрузка 2: Контекстный режим
-export function useSafeWebSocket(url: string, protocols?: string | string[]): WebSocket;
+export function useSafeWebSocket(url: string, protocols?: string | string[]): WebSocket | null;
 
 // Реализация
 export function useSafeWebSocket(
   arg1: object | string,
   arg2?: string | string[],
   arg3?: string | string[],
-): WebSocket {
+): WebSocket | null {
   let componentRef: object;
   let url: string;
   let protocols: string | string[] | undefined;
@@ -41,30 +41,32 @@ export function useSafeWebSocket(
     protocols = arg3;
   }
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const [ws, setWebSocket] = useState<WebSocket | null>(null);
 
   // ОПТИМИЗАЦИЯ: В продакшене с disableInProduction используем нативный WebSocket
   if (globalEngine.disableInProduction && globalEngine.mode === 'production') {
     useEffect(() => {
       const ws = new WebSocket(url, protocols);
-      wsRef.current = ws;
+      setWebSocket(ws);
       return () => {
         if (ws.readyState === WS_OPEN || ws.readyState === WS_CONNECTING) {
           ws.close(1000, 'Component unmounted');
         }
       };
     }, [url, protocols]);
-    return wsRef.current!;
+    return ws;
   }
 
   useEffect(() => {
     const ws = new WebSocket(url, protocols);
-    wsRef.current = ws;
+    setWebSocket(ws);
 
+    let closed = false;
     const operationId = globalEngine.trackOperation(componentRef, {
       type: 'websocket',
       cleanup: () => {
-        if (ws.readyState === WS_OPEN || ws.readyState === WS_CONNECTING) {
+        if (!closed && (ws.readyState === WS_OPEN || ws.readyState === WS_CONNECTING)) {
+          closed = true;
           ws.close(1000, 'Component unmounted - LeakGuard cleanup');
         }
       },
@@ -72,7 +74,8 @@ export function useSafeWebSocket(
     });
 
     return () => {
-      if (ws.readyState === WS_OPEN || ws.readyState === WS_CONNECTING) {
+      if (!closed && (ws.readyState === WS_OPEN || ws.readyState === WS_CONNECTING)) {
+        closed = true;
         ws.close(1000, 'Component unmounted');
       }
       if (operationId) {
@@ -81,5 +84,5 @@ export function useSafeWebSocket(
     };
   }, [url, protocols, componentRef]);
 
-  return wsRef.current!;
+  return ws;
 }
