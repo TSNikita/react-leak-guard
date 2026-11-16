@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { globalEngine } from '../core/engine';
 import { LeakGuardContext } from './LeakGuardContext';
 
@@ -8,7 +8,8 @@ import { LeakGuardContext } from './LeakGuardContext';
 export function useLeakGuard(componentName: string) {
   const componentRef = useRef<object>({}).current;
 
-  useEffect(() => {
+  const useRegistrationEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+  useRegistrationEffect(() => {
     // Передаем имя компонента в движок для лучшего логирования и отчетов
     globalEngine.register(componentRef, componentName);
 
