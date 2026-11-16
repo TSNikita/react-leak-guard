@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
-import { useLeakGuard, useSafeWebSocket, useSafeWorker } from '../../index';
+import { LeakGuardProvider, useLeakGuard, useSafeWebSocket, useSafeWorker } from '../../index';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -39,4 +39,26 @@ describe('resource hooks', () => {
     expect(socket.close).toHaveBeenCalledTimes(1);
     expect(worker.terminate).toHaveBeenCalled();
   });
+});
+
+it('keeps a context resource alive after the provider mounts', () => {
+  const socket = { readyState: 1, close: vi.fn() };
+  vi.stubGlobal(
+    'WebSocket',
+    vi.fn(function () {
+      return socket;
+    }),
+  );
+  function Child() {
+    useSafeWebSocket('ws://localhost');
+    return null;
+  }
+  const view = render(
+    <LeakGuardProvider componentName="Parent">
+      <Child />
+    </LeakGuardProvider>,
+  );
+  expect(socket.close).not.toHaveBeenCalled();
+  view.unmount();
+  expect(socket.close).toHaveBeenCalledTimes(1);
 });
