@@ -1,442 +1,147 @@
-```markdown
-<div align="center">
-  <h1>🛡️ React Leak Guard</h1>
-  <p><strong>Zero-config memory leak prevention for React applications</strong></p>
+# React Leak Guard
 
-  <p>
-    <a href="https://www.npmjs.com/package/react-leak-guard">
-      <img src="https://img.shields.io/npm/v/react-leak-guard.svg" alt="npm version" />
-    </a>
-    <a href="https://github.com/yourusername/react-leak-guard/actions">
-      <img src="https://github.com/yourusername/react-leak-guard/actions/workflows/test.yml/badge.svg" alt="Build Status" />
-    </a>
-    <a href="https://www.typescriptlang.org/">
-      <img src="https://img.shields.io/badge/TypeScript-strict-blue.svg" alt="TypeScript" />
-    </a>
-    <a href="https://bundlephobia.com/package/react-leak-guard">
-      <img src="https://img.shields.io/bundlephobia/minzip/react-leak-guard" alt="Bundle Size" />
-    </a>
-    <a href="https://github.com/yourusername/react-leak-guard/blob/main/LICENSE">
-      <img src="https://img.shields.io/npm/l/react-leak-guard.svg" alt="License" />
-    </a>
-  </p>
-</div>
+React hooks and utilities for associating asynchronous operations with a component's lifetime. The library can clear timers and event listeners, abort tracked requests, and block tracked state updates after a registered component unmounts. Its hooks run in production as well as development.
 
----
+It only manages operations registered through its API. It is not a general memory profiler, and a state update after unmount does not by itself prove a memory leak.
 
-## 🎯 What is React Leak Guard?
-
-React Leak Guard is a **production-ready library** that automatically prevents memory leaks in React applications by
-blocking state updates on unmounted components, cleaning up timers, event listeners, WebSocket connections, and Web
-Workers.
-
-### The Problem It Solves
-
-```tsx
-// ❌ Classic memory leak - setState after unmount
-function UserProfile() {
-  const [user, setUser] = useState(null);
-  
-  useEffect(() => {
-    fetch('/api/user').then(res => {
-      res.json().then(data => {
-        // Component might be unmounted by now!
-        setUser(data); // ⚠️ Memory leak + console warning
-      });
-    });
-  }, []);
-  
-  return <div>{user?.name}</div>;
-}
-```
-
-### The Solution
-
-```tsx
-// ✅ Zero leaks with React Leak Guard
-import { useSafeState, useSafeFetch } from 'react-leak-guard';
-
-function UserProfile() {
-  const [user, setUser] = useSafeState('UserProfile', null);
-  const safeFetch = useSafeFetch();
-
-  useEffect(() => {
-    safeFetch('/api/user')
-      .then(res => res.json())
-      .then(data => setUser(data)); // ✅ Automatically blocked if unmounted
-  }, []);
-
-  return <div>{user?.name}</div>;
-}
-```
-
----
-
-## ✨ Features
-
-- 🛡️ **Automatic leak prevention** - Block state updates on unmounted components
-- ⚡ **Zero overhead in production** - Optional `disableInProduction` mode for 0% performance impact
-- 🎯 **Context-aware hooks** - No prop drilling with `<LeakGuardProvider>`
-- 🔄 **React StrictMode compatible** - Works perfectly with double-mount behavior
-- 🌐 **Server-side rendering safe** - Full React Server Components (RSC) support
-- 🧪 **Testing utilities** - `setTestingMode()` for cleaner test output
-- 📦 **Tiny bundle size** - < 3KB minified + gzipped
-- 🔧 **TypeScript first** - Full type safety with strict mode
-- 🎨 **Developer-friendly** - Clear error messages with stack traces
-- 🚀 **Production-ready** - Used in enterprise applications
-
----
-
-## 📦 Installation
+## Installation
 
 ```bash
 npm install react-leak-guard
-# or
-yarn add react-leak-guard
-# or
-pnpm add react-leak-guard
 ```
 
----
+React 16.8 or later is declared as a peer dependency.
 
-## 🚀 Quick Start
+## Getting started
 
-### 1. Wrap your app with Provider (optional but recommended)
-
-```tsx
-import { LeakGuardProvider } from 'react-leak-guard';
-
-function App() {
-  return (
-    <LeakGuardProvider componentName="App">
-      <YourApp />
-    </LeakGuardProvider>
-  );
-}
-```
-
-### 2. Use safe hooks instead of native ones
+Register each component whose lifetime should control its operations, then pass the returned reference to the hooks:
 
 ```tsx
-import {
-  useSafeState,
-  useSafeTimeout,
-  useSafeEventListener,
-  useSafeFetch
-} from 'react-leak-guard';
+import { useCallback } from 'react';
+import { useLeakGuard, useSafeState, useSafeTimeout } from 'react-leak-guard';
 
-function MyComponent() {
-  // ✅ Safe state updates
-  const [count, setCount] = useSafeState('MyComponent', 0);
+function Counter() {
+  const guard = useLeakGuard('Counter');
+  const [count, setCount] = useSafeState(guard, 'Counter', 0);
+  const increment = useCallback(() => setCount(value => value + 1), [setCount]);
 
-  // ✅ Automatic timer cleanup
-  useSafeTimeout(() => {
-    setCount(c => c + 1);
-  }, 1000);
-
-  // ✅ Automatic event listener cleanup
-  useSafeEventListener(window, 'resize', handleResize);
-
-  // ✅ Automatic fetch abort on unmount
-  const safeFetch = useSafeFetch();
+  useSafeTimeout(guard, increment, 1000);
 
   return <div>{count}</div>;
 }
 ```
 
----
+`useLeakGuard` registers the reference in an effect and unregisters it during cleanup. The engine calls cleanup functions for operations still tracked under that reference. The timeout hook also clears its own timer when its effect is cleaned up. A changing callback or delay restarts the timeout; use a stable callback when that is not desired.
 
-## 📚 API Documentation
+## Hooks
 
-### Core Hooks
+### `useLeakGuard(componentName)`
 
-#### `useSafeState`
+Returns a stable object identifying the component to the global engine. Pass it to the explicit-reference forms below. Registration occurs in an effect, so invoke tracked operations after registration, such as in an effect declared after `useLeakGuard` or in a user event.
 
-Safe replacement for `useState` that blocks updates after unmount.
+### `useSafeState`
 
 ```tsx
-// With explicit ref
-const [state, setState] = useSafeState(componentRef, 'ComponentName', initialState);
-
-// With context (recommended)
-const [state, setState] = useSafeState('ComponentName', initialState);
-
-// With options
-const [state, setState] = useSafeState('ComponentName', initialState, {
-  allowPostUnmount: false // Allow updates after unmount (default: false)
-});
+const [value, setValue] = useSafeState(guard, 'Counter', 0);
+// Also supports a lazy initial value and functional updates.
 ```
 
-#### `useSafeTimeout`
+The setter checks whether the registered reference is mounted. By default it blocks calls after unregistration and records them in the engine's report. `useSafeState(guard, name, initialValue, { allowPostUnmount: true })` instead forwards those calls to React. This does not cancel the work that called the setter.
 
-Safe replacement for `setTimeout` with automatic cleanup.
+### `useSafeTimeout`
 
 ```tsx
-// With context
-useSafeTimeout(() => {
-  console.log('Executed after 1 second');
-}, 1000);
-
-// With explicit ref
-useSafeTimeout(componentRef, () => {
-  console.log('Executed after 1 second');
-}, 1000);
+useSafeTimeout(guard, callback, 1000);
 ```
 
-#### `useSafeEventListener`
+Schedules a timeout and clears it on effect cleanup. Changes to the callback or delay recreate the timer.
 
-Safe replacement for `addEventListener` with automatic cleanup.
+### `useSafeInterval`
 
 ```tsx
-// With context
-useSafeEventListener(window, 'scroll', handleScroll);
+const startInterval = useSafeInterval(guard);
 
-// With explicit ref
-useSafeEventListener(componentRef, window, 'scroll', handleScroll);
-
-// With options
-useSafeEventListener(window, 'scroll', handleScroll, { passive: true });
+useEffect(() => {
+  const id = startInterval(() => console.log('tick'), 1000);
+  return () => window.clearInterval(id);
+}, [startInterval]);
 ```
 
-#### `useSafeFetch`
+Returns a function that starts an interval and registers its cleanup with the engine. The returned ID can also be cleared manually. The hook does not unregister a manually cleared interval from the engine, so its cleanup may be called again on unmount.
 
-Safe wrapper for `fetch` that automatically aborts requests on unmount.
+### `useSafeEventListener`
 
 ```tsx
-const safeFetch = useSafeFetch();
+useSafeEventListener(guard, window, 'resize', handleResize);
+// Optional final argument: event listener options or capture boolean.
+```
+
+Adds the listener in an effect and removes it when the effect is cleaned up. As with ordinary effects, changes to the target, listener, event type or options cause reattachment. Access browser globals only where they are available; for server rendering, pass a suitable target once running in the browser.
+
+### `useSafeFetch`
+
+```tsx
+const safeFetch = useSafeFetch(guard);
 
 useEffect(() => {
   safeFetch('/api/data')
-    .then(res => res.json())
-    .then(data => setData(data));
-}, []);
+    .then(response => response.json())
+    .then(data => console.log(data))
+    .catch(error => {
+      if (error.name !== 'AbortError') console.error(error);
+    });
+}, [safeFetch]);
 ```
 
-#### `useSafeWebSocket`
+Each call creates an `AbortController` and registers its `abort()` function with the engine. The request is removed from tracking when `fetch` resolves or rejects. Since `fetch` can resolve before the response body has been consumed, body reading after that point is not covered by the engine's cleanup. The hook replaces any `signal` provided in `init` with its own signal. Handle rejected requests, including `AbortError`.
 
-Safe WebSocket connection with automatic cleanup.
+## Context mode
 
-```tsx
-const ws = useSafeWebSocket('wss://api.example.com/ws');
-
-useEffect(() => {
-  ws.onmessage = (event) => {
-    console.log(event.data);
-  };
-}, [ws]);
-```
-
-#### `useSafeWorker`
-
-Safe Web Worker with automatic termination.
+`LeakGuardProvider` creates a single guard reference and makes it available to descendant hooks that support context mode:
 
 ```tsx
-const worker = useSafeWorker('/worker.js');
-
-useEffect(() => {
-  worker.postMessage({ type: 'start' });
-  worker.onmessage = (event) => {
-    console.log(event.data);
-  };
-}, [worker]);
-```
-
-### Advanced API
-
-#### `LeakGuardProvider`
-
-Context provider for automatic component registration.
-
-```tsx
-<LeakGuardProvider componentName="App">
-  <YourApp />
+<LeakGuardProvider componentName="Section">
+  <SectionContents />
 </LeakGuardProvider>
 ```
 
-#### `withLeakGuard` (HOC)
+Within the provider, `useSafeState(name, initialValue)`, `useSafeTimeout(callback, delay)` and `useSafeEventListener(target, type, listener, options?)` can omit the reference. `useSafeFetch` and `useSafeInterval` require an explicit reference.
 
-Higher-Order Component for class components.
+The context reference belongs to the **provider**, not independently to each child. Operations tracked against it are tied to the provider's lifetime. In particular, a child's safe state setter can still be considered mounted after that child unmounts if the provider remains mounted. Timeout and event listener hooks additionally clean up their own effects. Use `useLeakGuard` in the component itself when its own lifetime must control tracked operations.
 
-```tsx
-class MyComponent extends React.Component {
-  render() {
-    return <div>Hello</div>;
-  }
-}
+## Reports and configuration
 
-export default withLeakGuard(MyComponent, 'MyComponent');
-```
-
-#### `globalEngine`
-
-Direct access to the engine for advanced configuration.
-
-```tsx
+```ts
 import { globalEngine } from 'react-leak-guard';
 
-// Enable strict mode (console.error instead of console.warn)
-globalEngine.strict = true;
-
-// Disable all checks in production for zero overhead
-if (process.env.NODE_ENV === 'production') {
-  globalEngine.disableInProduction = true;
-}
-
-// Enable testing mode for cleaner test output
-globalEngine.setTestingMode(true);
-
-// Get leak report
 const report = globalEngine.getReport();
-console.log(report);
-// {
-//   totalLeaks: 5,
-//   byComponent: { UserProfile: 3, Dashboard: 2 },
-//   byOperation: { setState: 4, fetch: 1 }
-// }
+console.log(report.totalLeaks, report.byComponent, report.byOperation);
 ```
 
----
+The report counts recorded blocked setter calls, not confirmed memory leaks. It retains up to 1,000 records. In production mode it returns aggregate counts; detailed records are returned in development mode.
 
-## ⚡ Performance
+The exported `globalEngine` is constructed in production mode except when `NODE_ENV` is `test`, when it uses development mode. Development mode can log blocked setter calls; setting `globalEngine.strict = true` selects error logging instead of warnings. In the default production mode those warnings are not emitted.
 
-React Leak Guard is designed for **zero overhead** in production:
+`globalEngine.disableInProduction = true` enables alternate paths in `useSafeState`, `useSafeTimeout`, and `useSafeEventListener`: the state hook returns the native setter, while timeout and event-listener hooks still clean up through their effects. It does not disable all hooks or guarantee zero overhead. Configure it before rendering and keep it stable during a component's lifetime.
 
-| Mode                               | Overhead             | Use Case                          |
-|------------------------------------|----------------------|-----------------------------------|
-| Development                        | ~1μs per operation   | Full leak detection with warnings |
-| Production                         | ~0.1μs per operation | Minimal checks, no logging        |
-| Production + `disableInProduction` | **0μs**              | Native React performance          |
+`globalEngine.setTestingMode(true)` disables engine registration, tracking and setter checks; it resets the registry. This is different from merely running with `NODE_ENV=test`. Hooks with their own effect cleanup still perform that cleanup. Set it back to `false` when engine behavior needs to be tested.
 
-### Benchmark Results
+On the server the engine skips registration and tracking and returns the original setter. Effects do not run during server rendering.
 
-```
-Native useState:              1,000,000 ops/sec
-useSafeState (prod):          950,000 ops/sec
-useSafeState (prod+disabled): 1,000,000 ops/sec ✅
-```
+## Other exports
 
----
+- `withLeakGuard(Component, name)` wraps a component, registers a guard and passes it as the `leakGuardRef` prop. The wrapped component must use that reference for tracked operations; wrapping alone does not clean up arbitrary work.
+- `LeakGuardEngine`, `LeakBuffer` and associated TypeScript types are exported for advanced use. The React hooks use the shared `globalEngine`.
 
-## 🧪 Testing
+WebSocket and Worker hooks exist in the source tree but are not currently exported by the package entry point, so they are not part of the public API described here.
 
-### Setup for Jest/Vitest
-
-Add to your `setupTests.ts` or `jest.setup.js`:
-
-```typescript
-import { globalEngine } from 'react-leak-guard';
-
-// Disable all leak checks during tests
-globalEngine.setTestingMode(true);
-```
-
-### Manual Testing
-
-```typescript
-import { globalEngine } from 'react-leak-guard';
-
-// Get leak report after test
-afterEach(() => {
-  const report = globalEngine.getReport();
-  if (report.totalLeaks > 0) {
-    console.warn('Memory leaks detected:', report);
-  }
-});
-```
-
----
-
-## 🌐 Browser Support
-
-- Chrome/Edge 61+
-- Firefox 60+
-- Safari 11+
-- iOS Safari 11+
-- React 16.8+ (with hooks support)
-- Next.js 13+ (App Router with RSC)
-
----
-
-## 🎯 Why Use React Leak Guard?
-
-### vs Manual Cleanup
-
-```tsx
-// ❌ Manual cleanup (error-prone)
-useEffect(() => {
-  const timer = setTimeout(() => {
-  }, 1000);
-  const handler = () => {
-  };
-  window.addEventListener('resize', handler);
-
-  return () => {
-    clearTimeout(timer);
-    window.removeEventListener('resize', handler);
-  };
-}, []);
-
-// ✅ Automatic cleanup (React Leak Guard)
-useSafeTimeout(() => {
-}, 1000);
-useSafeEventListener(window, 'resize', handler);
-```
-
-### vs Other Libraries
-
-| Feature                  | React Leak Guard | react-use  | ahooks     |
-|--------------------------|------------------|------------|------------|
-| Memory leak prevention   | ✅ Full           | ❌ Partial  | ❌ Partial  |
-| Context-aware            | ✅ Yes            | ❌ No       | ❌ No       |
-| Zero production overhead | ✅ Yes            | ❌ No       | ❌ No       |
-| RSC compatible           | ✅ Yes            | ❌ No       | ❌ No       |
-| TypeScript strict mode   | ✅ Yes            | ⚠️ Partial | ⚠️ Partial |
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+## Development
 
 ```bash
-# Clone the repo
-git clone https://github.com/TSNikita/react-leak-guard.git
-
-# Install dependencies
 npm install
-
-# Run tests
-npm test
-
-# Build
+npm run test:run
+npm run lint
 npm run build
 ```
 
----
-
-## 📄 License
-
-MIT © [Nikita](https://github.com/TSNikita/react-leak-guard)
-
----
-
-## 🙏 Acknowledgments
-
-Inspired by the React team's work on concurrent features and the need for better memory management in large-scale
-applications.
-
----
-
-<div align="center">
-  <p>
-    <strong>Made with ❤️ for the React community</strong>
-  </p>
-  <p>
-    <a href="https://github.com/yourusername/react-leak-guard/stargazers">Star us on GitHub</a> · 
-    <a href="https://github.com/yourusername/react-leak-guard/issues">Report Bug</a> · 
-    <a href="https://github.com/yourusername/react-leak-guard/issues">Request Feature</a>
-  </p>
-</div>
-```
-
----
+See [CONTRIBUTING.md](CONTRIBUTING.md). The package metadata declares the MIT license; the repository currently does not contain a separate license file.
